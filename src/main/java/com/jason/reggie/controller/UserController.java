@@ -4,11 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.jason.reggie.common.R;
 import com.jason.reggie.entity.User;
 import com.jason.reggie.service.UserService;
-import com.jason.reggie.utils.SMSUtils;
 import com.jason.reggie.utils.ValidateCodeUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,11 +16,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpSession;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @Slf4j
 @RequestMapping("/user")
 public class UserController {
+
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     @Autowired
     private UserService userService;
@@ -42,8 +46,12 @@ public class UserController {
 
             //用其他方式获取验证码完成登录
 
-            //需要将生成的验证码保存到Session
-            session.setAttribute(phone,code);
+//            //需要将生成的验证码保存到Session
+//            session.setAttribute(phone,code);
+
+            //将验证码缓存到redis中
+            redisTemplate.opsForValue().set(phone,code,1, TimeUnit.MINUTES);
+
 
             return R.success("短信发送成功");
         }
@@ -59,8 +67,9 @@ public class UserController {
         //获取验证码
         String code = map.get("code").toString();
 
-        //从Session中获取保存的验证码
-        Object codeInSession = session.getAttribute(phone);
+//        //从Session中获取保存的验证码
+//        Object codeInSession = session.getAttribute(phone);
+        Object codeInSession = redisTemplate.opsForValue().get(phone);
 
         //进行验证码的比对(页面提交的验证码和Session中保存的验证码比对)
         if(codeInSession != null && codeInSession.equals(code)){
@@ -75,6 +84,7 @@ public class UserController {
                 userService.save(one);
             }
             session.setAttribute("user",one.getId());
+            redisTemplate.delete(phone);
             return R.success(one);
         }
 
