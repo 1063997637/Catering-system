@@ -3,26 +3,34 @@ package com.jason.reggie.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 
+import com.jason.reggie.common.R;
 import com.jason.reggie.dto.DishDto;
 import com.jason.reggie.entity.Dish;
 import com.jason.reggie.entity.DishFlavor;
 import com.jason.reggie.mapper.DishMapper;
 import com.jason.reggie.service.DishFlavorService;
 import com.jason.reggie.service.DishService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements DishService {
 
     @Autowired
     private DishFlavorService dishFlavorService;
+
+    @Autowired
+    private RedisTemplate redisTemplate;
     /**
      * 新增菜品同时保存口味数据
      * @param dishDto
@@ -30,6 +38,9 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
     @Override
     @Transactional
     public void saveWithFlavor(DishDto dishDto) {
+//        删除原有缓存
+//        String key =  "dish_"+dishDto.getCategoryId();
+//        redisTemplate.delete(key);
         this.save(dishDto);
 
         Long id = dishDto.getId();
@@ -109,12 +120,25 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
     }
 
     /**
-     * 菜品信息和口味信息列表
+     * 菜品信息和口味信息列表,使用redis
      * @param categoryId
      * @return
      */
     @Override
     public List<DishDto> alllist(Long categoryId) {
+
+        //构造key
+        String key = "dish_"+categoryId;
+
+        //查询redis
+        List<DishDto> redisdish = (List<DishDto>) redisTemplate.opsForValue().get(key);
+
+        if(redisdish != null){
+            log.info("正在使用redis的数据");
+            return redisdish;
+        }
+
+        //查询数据库
         LambdaQueryWrapper<Dish> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(Dish::getCategoryId,categoryId);
         List<Dish> list = this.list(queryWrapper);
@@ -126,6 +150,9 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
             dishDto.setFlavors(dishFlavorService.list(queryWrapper1));
             return dishDto;
         }).collect(Collectors.toList());
+
+        //缓存到redis中
+        redisTemplate.opsForValue().set(key,collect,60, TimeUnit.MINUTES);
 
         return collect;
     }
